@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>AI Subtitle Reader</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-6">
+  <div class="max-w-3xl mx-auto bg-white shadow-lg rounded-lg p-6 space-y-4">
+    <h1 class="text-2xl font-bold text-center">🎬 AI Subtitle Reader</h1>
+    <div>
+      <label class="font-semibold block mb-1">Movie Name</label>
+      <input id="movieName" class="border rounded p-2 w-full" type="text" placeholder="Enter movie name (e.g., Inception)">
+    </div>
+    <div>
+      <label class="font-semibold block mb-1">Upload Subtitle (.srt)</label>
+      <input id="subtitleFile" type="file" accept=".srt" class="w-full text-sm">
+    </div>
+    <div>
+      <label class="font-semibold block mb-1">OpenAI API Key</label>
+      <input id="apiKey" class="border rounded p-2 w-full" type="password" placeholder="sk-...">
+    </div>
+    <button id="startBtn" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 w-full mt-2">Start Reading</button>
+    <div id="output" class="mt-4 p-4 border bg-gray-50 rounded h-64 overflow-y-scroll"></div>
+  </div>
+
+  <script>
+    const startBtn = document.getElementById("startBtn");
+    const output = document.getElementById("output");
+
+    startBtn.onclick = async () => {
+      const fileInput = document.getElementById("subtitleFile").files[0];
+      const movieName = document.getElementById("movieName").value.trim();
+      const apiKey = document.getElementById("apiKey").value.trim();
+
+      if (!fileInput || !movieName || !apiKey) {
+        alert("Please fill all fields.");
+        return;
+      }
+
+      const fileText = await fileInput.text();
+      const subtitles = parseSRT(fileText);
+      output.innerHTML = `<p class="text-sm text-gray-600">Subtitles loaded: ${subtitles.length} lines.</p>`;
+
+      for (let s of subtitles) {
+        const speakerInfo = await getSpeakerInfo(apiKey, movieName, s.text);
+        const voiceId = selectVoice(speakerInfo.gender);
+        const lineHTML = `<div class="border-b py-2">
+          <p><strong>${speakerInfo.name || "Unknown"}</strong>: ${s.text}</p>
+          <p class="text-xs text-gray-500">${speakerInfo.gender}, style: ${speakerInfo.style}</p>
+        </div>`;
+        output.innerHTML += lineHTML;
+        output.scrollTop = output.scrollHeight;
+
+        await speak(apiKey, s.text, voiceId);
+      }
+    };
+
+    function parseSRT(data) {
+      const entries = data.split(/\r?\n\r?\n/);
+      const parsed = [];
+      for (let entry of entries) {
+        const lines = entry.trim().split(/\r?\n/);
+        if (lines.length >= 3) {
+          const index = lines[0];
+          const times = lines[1].split(" --> ");
+          const text = lines.slice(2).join(" ").replace(/\s+/g, " ").trim();
+          parsed.push({
+            index,
+            start: times[0],
+            end: times[1],
+            text
+          });
+        }
+      }
+      return parsed;
+    }
+
+    async function getSpeakerInfo(apiKey, movieName, lineText) {
+      const url = "https://api.openai.com/v1/chat/completions";
+      const systemPrompt = `
+You are a helpful assistant who guesses the likely speaking character in the movie "${movieName}" from a given dialogue line. 
+You ALWAYS provide a reasonable character name, even if you have to make an educated guess. 
+ONLY reply in this exact JSON format: { "name": string, "gender": "male"|"female", "style": string }. 
+For example: { "name": "Cobb", "gender": "male", "style": "confident" }.
+Never reply with 'unknown' unless it is truly impossible to guess.
+`;
+
+      const messages = [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: `Movie: ${movieName}\nDialogue: "${lineText}"` }
+      ];
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages
+        })
+      });
+
+      const data = await response.json();
+      try {
+        // Handle cases where extraneous text is returned with the JSON
+        const match = data.choices[0].message.content.match(/{[\s\S]*}/);
+        if (match) {
+          return JSON.parse(match[0]);
+        }
+        return { name: "Unknown", gender: "unknown", style: "neutral" };
+      } catch {
+        return { name: "Unknown", gender: "unknown", style: "neutral" };
+      }
+    }
+
+    function selectVoice(gender) {
+      return gender === "female" ? "alloy" : "verse"; // example placeholders; choose from available OpenAI voices
+    }
+
+    async function speak(apiKey, text, voiceId) {
+      const res = await fetch("https://api.openai.com/v1/audio/speech", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: "gpt-4o-mini-tts",
+          voice: voiceId,
+          input: text
+        })
+      });
+
+      const arrayBuffer = await res.arrayBuffer();
+      const blob = new Blob([arrayBuffer], { type: "audio/mpeg" });
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      await audio.play();
+
+      // Wait for the audio to finish before proceeding
+      return new Promise(resolve => {
+        audio.onended = resolve;
+      });
+    }
+  </script>
+</body>
+</html>
