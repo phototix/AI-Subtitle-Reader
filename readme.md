@@ -20,10 +20,6 @@
     - The app will display and narrate each subtitle line, guessing the character and adapting the AI voice accordingly.
     - The narration pauses at each line until speech playback finishes.
 
-## Example
-
-![App screenshot](https://github.com/yourusername/aisubtitlereader/screenshot.png) <!-- replace with actual screenshot if available -->
-
 ## Requirements
 
 - Modern web browser (Chrome, Edge, Firefox, Safari)
